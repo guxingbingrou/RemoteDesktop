@@ -5,8 +5,10 @@ import androidx.appcompat.app.AppCompatActivity;
 import android.content.Intent;
 import android.media.MediaRecorder;
 import android.os.Bundle;
+import android.util.Log;
 
 import org.json.JSONObject;
+import org.webrtc.DataChannel;
 import org.webrtc.DefaultVideoDecoderFactory;
 import org.webrtc.DefaultVideoEncoderFactory;
 import org.webrtc.EglBase;
@@ -23,15 +25,20 @@ import org.webrtc.VideoSource;
 import org.webrtc.VideoTrack;
 import org.webrtc.audio.JavaAudioDeviceModule;
 
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
-public class DesktopClientActivity extends AppCompatActivity implements SignalingClient.Callback {
-    SurfaceViewRenderer remoteView;
+public class DesktopClientActivity extends AppCompatActivity implements SignalingClient.Callback,
+        SkySurfaceViewRenderer.Callback, ParamProcessor.Callback{
+    SkySurfaceViewRenderer remoteView;
     private static final String TAG = "zypDesktopClient";
     private PeerConnectionFactory peerConnectionFactory;
     private PeerConnection peerConnection;
-    MediaStream remoteStream;
+    private DataChannel dataChannel;
+    private boolean isDataChannelOpen = false;
+    private ParamProcessor paramProcessor;
+
     EglBase.Context eglBaseContext;
 
     @Override
@@ -69,6 +76,7 @@ public class DesktopClientActivity extends AppCompatActivity implements Signalin
         remoteView = findViewById(R.id.remoteView);
         remoteView.setMirror(false);
         remoteView.init(eglBaseContext, null);
+        remoteView.SetCallback(this);
 
         CreatePeerConnection();
     }
@@ -96,6 +104,54 @@ public class DesktopClientActivity extends AppCompatActivity implements Signalin
                 runOnUiThread(() -> {
                     remoteVideoTrack.addSink(remoteView);
                 });
+
+            }
+
+            @Override
+            public void onDataChannel(DataChannel dataChannel) {
+                super.onDataChannel(dataChannel);
+                SetDataChannel(dataChannel);
+            }
+        });
+
+    }
+
+    public void SetDataChannel(DataChannel dataChannel){
+        this.dataChannel = dataChannel;
+        this.dataChannel.registerObserver(new DataChannel.Observer() {
+            @Override
+            public void onBufferedAmountChange(long l) {
+
+            }
+
+            @Override
+            public void onStateChange() {
+                switch (dataChannel.state()){
+                    case OPEN:
+                        isDataChannelOpen = true;
+                        paramProcessor = new ParamProcessor();
+                        paramProcessor.SetCallBack(GetThis());
+                        break;
+                    case CLOSED:
+                        isDataChannelOpen = false;
+                        paramProcessor = null;
+                        break;
+                }
+                Log.i(TAG, "data channel state is change: " + dataChannel.state());
+            }
+
+            @Override
+            public void onMessage(DataChannel.Buffer buffer) {
+                byte[] data = new byte[buffer.data.capacity()];
+                buffer.data.get(data);
+
+                switch (data[0]){
+                    case DataChannelProtocol.TypeParamChange:
+                        paramProcessor.ProcessData(data);
+                        break;
+                    default:
+                        break;
+                }
 
             }
         });
@@ -154,5 +210,27 @@ public class DesktopClientActivity extends AppCompatActivity implements Signalin
                 data.optInt("label"),
                 data.optString("candidate")
         ));
+    }
+
+    @Override
+    public void OnTouchEventDone(byte[] messageBytes) {
+        if(isDataChannelOpen && dataChannel != null){
+            DataChannel.Buffer buffer = new DataChannel.Buffer(ByteBuffer.wrap(messageBytes), true);
+            dataChannel.send(buffer);
+        }
+    }
+
+    @Override
+    public void onParamChanged(int w, int h, int orientation) {
+        remoteView.OnParamChanged(w, h, orientation);
+    }
+
+    public DesktopClientActivity GetThis(){
+        return this;
+    }
+
+    @Override
+    public void onBackPressed() {
+        
     }
 }

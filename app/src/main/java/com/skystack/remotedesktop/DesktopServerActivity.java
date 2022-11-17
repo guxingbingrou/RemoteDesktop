@@ -3,15 +3,21 @@ package com.skystack.remotedesktop;
 import androidx.appcompat.app.AppCompatActivity;
 
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.graphics.Point;
 import android.media.MediaRecorder;
 import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.Display;
+import android.view.Surface;
+import android.view.WindowManager;
 
 import org.json.JSONObject;
 import org.webrtc.AudioSource;
 import org.webrtc.AudioTrack;
+import org.webrtc.DataChannel;
 import org.webrtc.DefaultVideoDecoderFactory;
 import org.webrtc.DefaultVideoEncoderFactory;
 import org.webrtc.EglBase;
@@ -28,6 +34,7 @@ import org.webrtc.VideoSource;
 import org.webrtc.VideoTrack;
 import org.webrtc.audio.JavaAudioDeviceModule;
 
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -40,11 +47,16 @@ public class DesktopServerActivity extends AppCompatActivity implements Signalin
     private MediaStream localStream;
     private EglBase.Context eglBaseContext;
     private SurfaceTextureHelper surfaceTextureHelper;
+    private DataChannel dataChannel;
+    private boolean isDataChannelOpen = false;
+    private TouchEventProcessor touchEventProcessor;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_web_r_t_c);
+        startService(new Intent(this, DesktopServerService.class));
+
 
         StartScreenCapture();
     }
@@ -137,7 +149,6 @@ public class DesktopServerActivity extends AppCompatActivity implements Signalin
     }
 
     private void CreatePeerConnection(){
-        SignalingClient.getInstance().SetCallback(this);
 
         List<PeerConnection.IceServer> iceServerList = new ArrayList<>();
         iceServerList.add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer());
@@ -155,6 +166,74 @@ public class DesktopServerActivity extends AppCompatActivity implements Signalin
 
         peerConnection.addStream(localStream);
 
+        CreateDataChannel();
+
+        SignalingClient.getInstance().SetCallback(this);
+
+    }
+
+    private void CreateDataChannel(){
+        DataChannel.Init init = new DataChannel.Init();
+        init.ordered = true;
+        init.negotiated = false;
+
+        dataChannel = peerConnection.createDataChannel("zyp", init);
+        dataChannel.registerObserver(new DataChannel.Observer() {
+            @Override
+            public void onBufferedAmountChange(long l) {
+
+            }
+
+            @Override
+            public void onStateChange() {
+                switch (dataChannel.state()){
+                    case OPEN:
+                        isDataChannelOpen = true;
+                        touchEventProcessor = new TouchEventProcessor();
+                        SendInitData();
+                        break;
+                    case CLOSED:
+                        isDataChannelOpen = false;
+                        break;
+                }
+                Log.i(TAG, "data channel state is change: " + dataChannel.state());
+            }
+
+            @Override
+            public void onMessage(DataChannel.Buffer buffer) {
+                Log.i(TAG, "onDataChannelMessage, size: " + buffer.data.capacity());
+                byte[] data = new byte[buffer.data.capacity()];
+                buffer.data.get(data);
+
+                switch (data[0]){
+                    case DataChannelProtocol.TypeTouchEvent:
+                        touchEventProcessor.ProcessData(data);
+                        break;
+                    default:
+                        break;
+                }
+            }
+        });
+    }
+
+    private void SendInitData(){
+        if(isDataChannelOpen && dataChannel != null){
+            byte[] msg = new byte[DataChannelProtocol.ParamMessageLen];
+
+            msg[DataChannelProtocol.TypePos] = DataChannelProtocol.TypeParamChange;
+
+            Point point = new Point();
+            Display defaultDisplay = getWindowManager().getDefaultDisplay();
+            defaultDisplay.getRealSize(point);
+
+            msg[DataChannelProtocol.ParamOrientationPos] = (byte) defaultDisplay.getRotation();
+
+            DataChannelProtocol.intToBytes(point.x, msg, DataChannelProtocol.ParamRealWidthPos);
+            DataChannelProtocol.intToBytes(point.y, msg, DataChannelProtocol.ParamRealHeightPos);
+
+            DataChannel.Buffer buffer = new DataChannel.Buffer(ByteBuffer.wrap(msg), true);
+            dataChannel.send(buffer);
+        }
     }
 
     private void CreateOfferAndSend(){

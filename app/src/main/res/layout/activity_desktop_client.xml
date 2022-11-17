@@ -6,11 +6,11 @@
     android:layout_height="match_parent"
     tools:context=".DesktopClientActivity">
 
-    <org.webrtc.SurfaceViewRenderer
+    <com.skystack.remotedesktop.SkySurfaceViewRenderer
         android:id="@+id/remoteView"
         android:layout_width="match_parent"
         android:layout_height="match_parent">
-    </org.webrtc.SurfaceViewRenderer>
+    </com.skystack.remotedesktop.SkySurfaceViewRenderer>
 
 
 </androidx.constraintlayout.widget.ConstraintLayout>

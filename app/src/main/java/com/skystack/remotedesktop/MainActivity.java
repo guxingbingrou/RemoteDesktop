@@ -39,6 +39,7 @@ public class MainActivity extends AppCompatActivity {
         int id = item.getItemId();
         switch (id){
             case R.id.desktop_server:
+
                 startActivity(new Intent(MainActivity.this, DesktopServerActivity.class));
                 break;
             case R.id.desktop_client:
